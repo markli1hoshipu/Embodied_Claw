@@ -1,0 +1,28 @@
+run_id: perturb_recovery3
+dataset_name: b1k_perturb_recovery3_task0_curated
+train_config_name: pi05_b1k_perturb_recovery3_task0_curated
+hf_model_repo: Hoshipu/pi05-b1kt0-perturbrec3-lr2.5e5
+hf_dataset_repo: Hoshipu/b1k_perturb_recovery3_task0_curated
+sources:
+  - hf_repo: behavior-1k/2025-challenge-demos
+    repo_type: dataset
+    kind: snapshot
+    allow_patterns:
+      - meta/*
+      - data/task-0000/*
+      - annotations/task-0000/*
+      - videos/task-0000/observation.images.rgb.*/*
+    local_dir: /work/markhsp/datasets/behavior-1k-2025-challenge-demos
+  - hf_repo: n8wishh/failure_recovery
+    repo_type: dataset
+    kind: single_file_zip
+    filename: output_0601.zip
+    local_dir: /work/markhsp/datasets/perturb-recovery3
+builder_script: scripts/build_perturb_recovery3_task0_curated_lerobot.py
+pca_thresh: 4.83
+dup_factor: 5
+train_script: scripts/train_pi05_b1k_perturb_recovery3_task0_curated.sh
+num_train_steps: 60000
+save_interval: 10000
+batch_size: 32
+peak_lr: 2.5e-5
