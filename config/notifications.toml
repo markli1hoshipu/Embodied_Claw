@@ -1,0 +1,8 @@
+# Escalation notifications (spec section 7.1 step 4). Optional — when this file is absent the
+# defaults below apply: notify-send + an append to ~/.cache/embodied_claw/inbox.log.
+# The Slack bridge does NOT read this file; it watches the runs/*/escalations mailbox directly.
+
+[notify]
+# Shell template; {summary} is substituted (already shell-quoted).
+command = "notify-send 'Embodied Claw' {summary}"
+inbox_log = "~/.cache/embodied_claw/inbox.log"

@@ -1,100 +1,92 @@
-import helpers as H
+"""CLI surface: inbox, reply, run guards, --detach."""
+import json
+
 import pytest
-import yaml
 
-import pipeline.graph as G
-from pipeline import cli, nodes
+from pipeline import cli, tools
 
 
-def test_load_config_rejects_missing_keys(tmp_path):
-    p = tmp_path / "bad.yaml"
-    p.write_text("run_id: x\n")
-    with pytest.raises(SystemExit):
-        cli.load_config(str(p))
+def test_inbox_empty_clean_output(env, capsys):
+    cli.main(["inbox"])
+    assert capsys.readouterr().out.strip() == "inbox empty — no pending escalations."
 
 
-def test_load_config_roundtrip(tmp_path, cfg):
-    p = tmp_path / "ok.yaml"
-    p.write_text(yaml.safe_dump(cfg))
-    assert cli.load_config(str(p))["dataset_name"] == cfg["dataset_name"]
-
-
-def test_dry_run_table_attach_mode(cfg, sandbox, monkeypatch, capsys):
-    H.make_sources(cfg)
-    H.make_drop_lists(nodes, cfg)
-    H.make_built(nodes, cfg, episodes=13)
-    H.make_norm(nodes, cfg)
-    monkeypatch.setattr(nodes, "find_train_pids", lambda n: [4242])
-    monkeypatch.setattr(nodes, "last_progress", lambda c: "Progress on: 2.45kit/60.0kit rate:3.4it/s")
-    cli.dry_run(cfg)
+def test_help_usable(capsys):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--help"])
+    assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "SKIP (artifacts present: 2/2 sources ready)" in out
-    assert "SKIP (info.json present, total_episodes=13 == expected 13)" in out
-    assert "SKIP (norm_stats.json present, 2048 bytes)" in out
-    assert "ATTACH (already running, pids=[4242], last progress: Progress on: 2.45kit" in out
-    assert "PENDING (blocked on train)" in out
+    assert "run" in out and "reply" in out and "inbox" in out
 
 
-def test_dry_run_would_run_stages(cfg, sandbox, monkeypatch, capsys):
-    monkeypatch.setattr(nodes, "find_train_pids", lambda n: [])
-    cli.dry_run(cfg)
+def test_reply_by_option_and_node(run_dir, capsys):
+    eid = tools.new_escalation_id("filter_build")
+    tools.write_question(run_dir, eid, node="filter_build", agent="data_agent", question="q?",
+                         options=[{"id": 1, "label": "p98"}])
+    cli.main(["reply", "--run-id", "tr1", "--node", "filter_build", "--option", "1"])
+    assert "reply recorded for [tr1:filter_build]" in capsys.readouterr().out
+    p = run_dir / "escalations" / f"{eid}.reply.txt"
+    assert p.read_text() == "1"
+    assert tools.read_reply(run_dir, eid) == {"type": "option", "option": 1}
+
+
+def test_reply_requires_target_and_payload(env, run_dir):
+    with pytest.raises(SystemExit, match="no pending escalation"):
+        cli.main(["reply", "--run-id", "tr1", "--node", "train", "--option", "1"])
+    with pytest.raises(SystemExit, match="--option N or --message"):
+        cli.main(["reply", "--latest"])
+
+
+def test_inbox_lists_pending_with_run_node_prefix(run_dir, capsys):
+    eid = tools.new_escalation_id("train")
+    tools.write_question(run_dir, eid, node="train", agent="training_agent", question="loss ok?")
+    cli.main(["inbox"])
     out = capsys.readouterr().out
-    assert "RUN (missing sources: org/official, org/perturb)" in out
-    assert "RUN (meta/info.json missing or stale" in out
-    assert "RUN (norm_stats.json missing)" in out
-    assert "RUN (no live process" in out
+    assert "[tr1:train]" in out and "loss ok?" in out and eid in out
 
 
-def test_dry_run_stays_offline_when_train_complete(cfg, sandbox, monkeypatch, capsys):
-    """dry-run promises 'side-effect free AND offline' — it must not issue HF API GETs even
-    when train is complete and the upload skip-check would normally query the Hub."""
-    H.make_sources(cfg)
-    H.make_drop_lists(nodes, cfg)
-    H.make_built(nodes, cfg, episodes=13)
-    H.make_norm(nodes, cfg)
-    H.make_final_ckpt(nodes, cfg)
-    monkeypatch.setattr(nodes, "needs_upload",
-                        lambda c: (_ for _ in ()).throw(AssertionError("network call in dry-run")))
-    cli.dry_run(cfg)
-    out = capsys.readouterr().out
-    assert "would check HF repo contents" in out
+def test_run_requires_request_txt(env):
+    with pytest.raises(SystemExit, match="no request found"):
+        cli.main(["run", "ghost_run"])
 
 
-def test_run_then_status(cfg, sandbox, monkeypatch, tmp_path, capsys):
-    H.make_sources(cfg)
-    H.make_drop_lists(nodes, cfg)
-    H.make_built(nodes, cfg, episodes=13)
-    H.make_norm(nodes, cfg)
-    H.make_final_ckpt(nodes, cfg)
-    monkeypatch.setattr(nodes, "_hf_api", lambda token=None: H.FakeApi(exists=True))
-    runs_dir = tmp_path / "pipeline_runs"
-    monkeypatch.setattr(G, "PIPELINE_RUNS_DIR", runs_dir)
-    monkeypatch.setattr(cli, "PIPELINE_RUNS_DIR", runs_dir)
-    cli.run(cfg)
-    cli.show_status(cfg["run_id"])
-    out = capsys.readouterr().out
-    assert '"status": "skipped"' in out
-    assert cfg["dataset_name"] in out
+def test_run_detach_relaunches_via_setsid_session(run_dir, monkeypatch, capsys):
+    import subprocess
+    seen = {}
+
+    def popen(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return None
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    cli.main(["run", "tr1", "--detach"])
+    assert seen["cmd"][1:] == ["-m", "pipeline.cli", "run", "tr1"]
+    assert seen["kw"]["start_new_session"] is True
+    assert "detached driver started" in capsys.readouterr().out
 
 
-def test_status_never_executed_run_is_clean_exit_zero(tmp_path, monkeypatch, capsys):
-    """'Never executed' is an expected, legitimate condition — exit 0, clear message."""
-    monkeypatch.setattr(cli, "PIPELINE_RUNS_DIR", tmp_path / "nope")
-    cli.show_status("ghost")  # must not SystemExit
-    assert "never been executed" in capsys.readouterr().out
+def test_run_writes_request_from_flag(env, monkeypatch):
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: None)
+    cli.main(["run", "fresh1", "--request", "train pi05 on task-0", "--detach"])
+    assert (tools.run_dir("fresh1") / "request.txt").read_text() == "train pi05 on task-0"
 
 
-def test_run_refuses_concurrent_same_run_id(cfg, tmp_path, monkeypatch):
-    """Single-instance flock: a second CLI on the same run_id must refuse to start (it could
-    double-launch the --overwrite train script)."""
+def test_single_instance_lock(graph_env, run_dir, monkeypatch):
     import fcntl
-    runs_dir = tmp_path / "pipeline_runs"
-    runs_dir.mkdir()
-    monkeypatch.setattr(cli, "PIPELINE_RUNS_DIR", runs_dir)
-    holder = open(runs_dir / f"{cfg['run_id']}.lock", "w")
-    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    lock = open(run_dir / ".driver.lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
         with pytest.raises(SystemExit, match="refusing to run"):
-            cli.run(cfg)
+            cli.main(["run", "tr1"])
     finally:
-        holder.close()
+        lock.close()
+
+
+def test_cmd_run_full_cycle_and_rerun_noop(graph_env, run_dir, capsys):
+    graph_env()  # patches the anthropic client; cmd_run builds its own graph on the same env
+    cli.main(["run", "tr1", "--poll", "0.01"])
+    out = capsys.readouterr().out
+    assert "=== tr1 ===" in out and out.count("succeeded") == 7
+    assert json.loads((run_dir / "artifacts.json").read_text())
+    cli.main(["run", "tr1"])  # all succeeded -> explicit no-op path
+    assert "already completed" in capsys.readouterr().out

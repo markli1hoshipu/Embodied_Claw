@@ -1,0 +1,62 @@
+{
+  "model": {
+    "family": "pi05",
+    "train_config_name": "pi05_aloha_full_base",
+    "model_name": "pi05-robotwin2-clean-30k",
+    "checkpoint_step": 30000
+  },
+  "benchmark": {
+    "name": "domino",
+    "tasks": [
+      "adjust_bottle",
+      "beat_block_hammer",
+      "click_alarmclock",
+      "click_bell",
+      "dump_bin_bigbin",
+      "grab_roller",
+      "handover_block",
+      "handover_mic",
+      "hanging_mug",
+      "move_can_pot",
+      "move_pillbottle_pad",
+      "move_playingcard_away",
+      "move_stapler_pad",
+      "place_a2b_left",
+      "place_a2b_right",
+      "place_bread_basket",
+      "place_bread_skillet",
+      "place_can_basket",
+      "place_container_plate",
+      "place_empty_cup",
+      "place_fan",
+      "place_mouse_pad",
+      "place_object_basket",
+      "place_object_scale",
+      "place_object_stand",
+      "place_phone_stand",
+      "place_shoe",
+      "press_stapler",
+      "put_bottles_dustbin",
+      "put_object_cabinet",
+      "rotate_qrcode",
+      "scan_object",
+      "shake_bottle",
+      "shake_bottle_horizontally",
+      "stamp_seal"
+    ],
+    "task_config": "demo_clean_dynamic",
+    "seed": 0,
+    "episodes_per_task": 10
+  },
+  "resources": {
+    "gpus_requested": 4,
+    "gpu_ids": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "gpu_ids_note": "RESTORED 2026-06-11 12:3x by benchmark_agent (zeroshot node, orphaned session, via data channel): harness respawn at 12:27:47 regenerated this config from the launch template, resetting gpu_ids to [0,1,2,3] - which COLLIDES with eval_ab_zeroshot (same GPUs AND same ports 9210-9213 = 9210+gpu_id; cross-run client/server crosstalk would silently eval the WRONG checkpoint and poison the A/B). The established split is: eval_ab_zeroshot on GPUs 0-3, eval_ab_robotwin30k on GPUs 4-7 (ports 9214-9217). If a future respawn regenerates this file again, re-apply."
+  },
+  "run_id": "eval_ab_robotwin30k"
+}

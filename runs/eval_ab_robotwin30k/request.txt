@@ -1,0 +1,1 @@
+evaluate pi05 model pi05_aloha_full_base/pi05-robotwin2-clean-30k step 30000 on domino benchmark, all tasks, task_config demo_clean_dynamic, using 4 GPUs

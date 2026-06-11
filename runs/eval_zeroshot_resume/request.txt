@@ -1,0 +1,1 @@
+Continue pi05 zero-shot baseline evaluation on the 27 remaining DOMINO tasks, 10 episodes per task, all 8 GPUs, langgraph pipeline.

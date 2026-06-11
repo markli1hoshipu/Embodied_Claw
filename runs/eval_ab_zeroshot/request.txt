@@ -1,0 +1,1 @@
+evaluate pi05 model pi05_aloha_full_base/pi05-base-zeroshot step 0 on domino benchmark, all tasks, task_config demo_clean_dynamic, using 4 GPUs

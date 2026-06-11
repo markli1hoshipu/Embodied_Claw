@@ -1,0 +1,18 @@
+Train a pi0.5 on the BEHAVIOR-1K task-0 radio task (prompt: "Turn on the radio receiver that's
+on the table in the living room.").
+
+Data: combine the official task-0 demos from behavior-1k/2025-challenge-demos (RGB-only video
+streams, task-0000 data/annotations/videos, into /work/markhsp/datasets/behavior-1k-2025-challenge-demos)
+with the new perturb-recovery v3 clips n8wishh uploaded as output_0601.zip in
+n8wishh/failure_recovery (into /work/markhsp/datasets/perturb-recovery3). Trim the official
+episodes to the move-to / pick-up / press skills and drop the place-on tail. Run the PCA outlier
+filter on the perturb clips at p98 — that cut came out to d_combined > 4.83 — and drop the
+outliers; keep using the existing merged drop list for the official episodes. Duplicate each kept
+perturb clip 5x, cap every episode at its shortest video stream, and build the result as
+lerobot dataset b1k_perturb_recovery3_task0_curated.
+
+Training: 60000 steps from pi05_base, peak lr 2.5e-5 (cosine decay), batch size 32, 8-GPU FSDP,
+save a checkpoint every 10000 steps, no wandb.
+
+Outputs: push the dataset to Hoshipu/b1k_perturb_recovery3_task0_curated and the model to
+Hoshipu/pi05-b1kt0-perturbrec3-lr2.5e5.

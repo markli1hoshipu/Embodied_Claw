@@ -1,0 +1,15 @@
+# ~/.config/systemd/user/embodied_claw_bridge.service  (spec 13.10)
+[Unit]
+Description=Embodied Claw Slack bridge
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/work/markhsp/Embodied_Claw
+EnvironmentFile=/work/markhsp/Embodied_Claw/.env
+ExecStart=/work/markhsp/Embodied_Claw/.venv/bin/python -m bridge.service
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

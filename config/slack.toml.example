@@ -1,0 +1,8 @@
+# Copy to config/slack.toml to enable the optional Slack allow-list (spec 13.8).
+# When set, ONLY these Slack user IDs may launch runs AND answer escalations
+# (thread replies + button clicks). When the file is absent, everyone in the
+# requests channel may do both.
+#
+# Find a user ID: Slack profile -> "..." -> Copy member ID (looks like U0XXXXXXX).
+#
+# allowed_users = ["U0AAAAAAA", "U0BBBBBBB"]

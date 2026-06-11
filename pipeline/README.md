@@ -1,110 +1,125 @@
-# pi0.5 BEHAVIOR-1K LangGraph pipeline
+# Embodied Claw — agentic pipeline
 
-Orchestrates the existing manual workflow — ingest → filter/build → norm-stats → train → HF upload —
-as a LangGraph state machine. The underlying scripts are invoked as black-box CLIs and are never
-modified. Spec: `scripts/PIPELINE_LANGGRAPH_SPEC.md`.
+LangGraph state machine (7 nodes) where the work inside each node is done by one of three
+long-lived Claude agents (`data_agent`, `training_agent`, `hf_agent`) with tool access to the
+section-5 skills. Single source of truth: `/work/markhsp/openpi/scripts/PIPELINE_AGENTIC_SPEC.md`.
+
+```
+intake -> ingest -> filter_build -> { upload_dataset || norm_stats } -> train -> upload_model
+ (data)    (data)      (data)          (hf)            (training)     (training)   (hf)
+```
+
+## Install
+
+The repo-root venv is already set up (`/work/markhsp/Embodied_Claw/.venv`, python 3.11:
+anthropic 0.109.0, langgraph 1.2.4 + sqlite saver, huggingface_hub, pytest). Heavy data-build
+skills (`slice_and_renumber`, `build_curated_dataset`) lazily import pyarrow/numpy — install
+them into the venv (`.venv/bin/pip install pyarrow numpy`) or rely on the skills that shell out
+to the `xvla-stable` conda env (downloads, PCA, norm stats, training all do).
+
+## Configure
+
+- `export ANTHROPIC_API_KEY=...` — required to run agents (clear error if missing).
+- `export HF_TOKEN=...` — required by ingest/upload skills. Never hardcoded.
+- Model: defaults to `claude-sonnet-4-6`. Override globally `EMBODIED_CLAW_MODEL=...` or
+  per-agent `EMBODIED_CLAW_MODEL_DATA_AGENT=claude-opus-4-8` etc. Adaptive thinking is on;
+  `EMBODIED_CLAW_THINKING=off` disables. `EMBODIED_CLAW_MAX_ITER` caps the tool loop (40).
+- Notifications: `config/notifications.toml` (`[notify] command`, `inbox_log`). Defaults:
+  `notify-send` + append to `~/.cache/embodied_claw/inbox.log`.
+- Path overrides (used by tests, useful for sandboxes): `EMBODIED_CLAW_RUNS`,
+  `EMBODIED_CLAW_AGENTS`, `EMBODIED_CLAW_CONFIG`, `EMBODIED_CLAW_CACHE`.
 
 ## Run
 
 ```bash
 cd /work/markhsp/Embodied_Claw
-export HF_TOKEN=hf_...          # required by ingest + upload; NEVER hardcoded anywhere
-pipeline/.venv/bin/python -m pipeline.cli runs/perturb_recovery3.yaml   # one or more YAMLs, sequential
+# request from a file you wrote:
+mkdir -p runs/my_run && $EDITOR runs/my_run/request.txt
+.venv/bin/python -m pipeline.cli run my_run
+# or inline:
+.venv/bin/python -m pipeline.cli run my_run --request "Train a pi0.5 on task-0 ... p98 ... 5x"
+# detached (what the Slack bridge spawns); equivalent to: setsid .venv/bin/python -m pipeline.cli run my_run </dev/null >runs/my_run/driver.log 2>&1 &
+.venv/bin/python -m pipeline.cli run my_run --detach
 ```
 
-Preview without executing anything (side-effect free; also detects a live training process):
+The driver is restart-safe: rerunning `run <run_id>` resumes from the sqlite checkpoint —
+completed nodes never re-execute; a node killed mid-flight replays from its persisted agent
+conversation; non-succeeded stages of a finished run are retried.
+
+## Reply to escalations
+
+Agents never guess on ESCALATE triggers — they write
+`runs/<run_id>/escalations/<node>_<ts>_<uuid>.question.json`, notify, and the graph pauses
+(checkpointed; survives kills). Reply via any of:
 
 ```bash
-pipeline/.venv/bin/python -m pipeline.cli --dry-run runs/perturb_recovery3.yaml
+.venv/bin/python -m pipeline.cli inbox                                  # list pending
+.venv/bin/python -m pipeline.cli reply --run-id my_run --node filter_build --option 1
+.venv/bin/python -m pipeline.cli reply --run-id my_run --node filter_build --message "p98 but force-drop 280"
+.venv/bin/python -m pipeline.cli reply --latest --message "go"
+echo "1" > runs/my_run/escalations/<escalation_id>.reply.txt            # plain file drop
 ```
 
-Inspect the checkpointed state of a run:
+A reply file whose content is a single integer selects that option id; anything else is a
+free-form message. The driver polls every 30s (`--poll`); after 24h it re-notifies and keeps
+waiting — no auto-defaults, ever. The Slack bridge talks to the same files; the pipeline never
+imports bridge code.
 
-```bash
-pipeline/.venv/bin/python -m pipeline.cli --status perturb_recovery3
-```
+## Inspect state
 
-`--status` exit codes: `0` for a readable state **and** for a run that has never been executed
-(it prints "never been executed"); `1` only for genuinely broken states (DB present but no
-checkpoint for the thread).
+- `runs/<id>/transitions.jsonl` — every stage status change (running/escalated/succeeded/...).
+- `runs/<id>/agent_messages/<node>.jsonl` — full per-node Claude transcript (tool calls included).
+- `runs/<id>/state.sqlite` — LangGraph checkpoint (thread_id == run_id).
+- `runs/<id>/artifacts.json`, `summary.md` — written at run end; `config.json` from intake.
+- `pipeline_runs/<id>` — symlink index of all runs.
 
-## How it works
+## Memory
 
-- State is the `PipelineState` TypedDict (`pipeline/state.py`): the YAML `RunConfig` + one
-  `StageStatus` per stage.
-- Every node checks its output artifacts at entry and returns `"skipped"` when they exist:
-  - ingest: each source's `local_dir` has parquets AND matches the expected-counts manifest
-    (`.pipeline_expected.json`, persisted on the first successful download from the repo file
-    listing / completed unzip) — a partially-downloaded tree is re-ingested, not skipped.
-    Pre-pipeline data without a manifest falls back to the weak parquet-presence check.
-  - filter_build: `meta/info.json` exists and `total_episodes` == expected
-    (source parquets matching THIS run's `allow_patterns` − PCA drops, perturb × dup_factor;
-    reads BOTH `pca_filter/merged/` and `pca_filter/<run_id>/drop_list.json`)
-  - norm_stats: `<lerobot>/norm_stats.json` exists
-  - train: `<ckpt_dir>/<num_train_steps-1>/` contains `params/` + `_CHECKPOINT_METADATA`
-  - upload: both HF repos exist AND hold the expected content (model: a `ckpt-*/params` file;
-    dataset: `meta/info.json`) — existence alone is not enough, since an interrupted upload
-    leaves a created-but-incomplete repo behind
-- Conditional edges halt the graph as soon as any stage reports `"failed"`.
-- Checkpointer: `SqliteSaver` → `/work/markhsp/Embodied_Claw/pipeline_runs/<run_id>.sqlite`
-  (`thread_id` = `run_id`; invoked with `durability="sync"`). `pipeline_runs/` is git-ignored
-  via the repo-root `.gitignore`.
-
-## Resume after a crash
-
-Just re-run the same command. Re-invoking the same `thread_id` restarts from START and the
-skip-if-done checks fast-forward past completed stages; nodes are idempotent. A crashed node can
-also be resumed in place by the checkpointer. State for debugging: `--status <run_id>`.
-
-## Train node specifics (read before touching)
-
-- **Attach mode**: before launching, the node pgreps `python.*scripts/train\.py.*<config_name>( |$)`
-  (narrow pattern — bash watchers carry the substring too, and the trailing boundary avoids prefix
-  collisions between config names, e.g. recovery vs recovery2/3). If a live process matches, it does
-  NOT launch — the train .sh passes `--overwrite`, so a duplicate launch would wipe the in-flight
-  run — and goes straight to the 60 s poll loop.
-- A pgrep **error** (rc ≥ 2: fork failure, bad regex) is treated as "assume alive" — never as
-  "no process" — so an unhandled error path can never double-launch. `_launch` re-checks liveness
-  immediately before every launch (fresh and NCCL-relaunch) to close the preflight TOCTOU window,
-  and `cli.run` holds an exclusive flock on `pipeline_runs/<run_id>.lock` so two CLI instances of
-  the same run cannot overlap.
-- Progress is read from the newest `logs/<config>_*.log` and `/tmp/train_<run_id>.log` (the latter
-  only exists when the pipeline itself launched the script), with `\r → \n` translation because
-  tqdm writes carriage returns. The heartbeat also reports the newest step dir in the ckpt dir as
-  an independent progress signal.
-- Pre-flight 8-GPU psum check runs only before a *fresh* launch (it can't run while GPUs are busy).
-- Crash triage: NCCL `CUDA failure 401` / `nvls.cc` in log bytes written **after** attach/launch
-  (stale logs from earlier runs are masked by size marks) → relaunch (max 2, after re-checking the
-  final checkpoint); anything else fails the stage for a human.
-- Overall poll timeout 24 h — patient enough for 4–6 h runs.
-
-## Safety notes
-
-- `filter_and_build` is gated hard: the builder `rmtree`s its output dir **including
-  norm_stats.json**, so it only runs when info.json is missing or the episode count is stale —
-  and it refuses to run at all while a live train process matches the config (the running job
-  may be streaming from that very dataset dir).
-- Upload staging uses hardlinks (`cp -al`) under `/work/markhsp/hf_staging/<run_id>/` — the
-  per-run subdir is a deliberate deviation from the spec's flat `/work/markhsp/hf_staging/` for
-  multi-run isolation (the resulting repo layout is identical); stale `ckpt-*` staging dirs from
-  a prior attempt are removed and re-hardlinked. The final `59999` step is staged as `ckpt-60000`.
-  `train_state/` and ckpt `assets/` are excluded; `norm_stats.json` is injected into each
-  `ckpt-*/assets/` afterwards. `HF_HUB_ENABLE_HF_TRANSFER=0` and `HF_HUB_DISABLE_XET=1` are forced
-  during the node (and restored afterwards). After uploading, the first staged file's hub SHA is
-  compared against the local bytes for both repos.
-- **Upload stall (spec failure mode 8)**: the automatic retry only covers `upload_large_folder`
-  calls that *fail with an exception* — between attempts the resumable-upload cache
-  `~/.cache/huggingface/upload` is cleared and HF dedups by SHA. A genuine silent **hang** on the
-  final shard has no in-process watchdog: kill the pipeline process manually, run
-  `rm -rf ~/.cache/huggingface/upload`, then rerun the same command — server-side SHAs resume and
-  only missing shards re-transfer.
+Each agent reads `agents/<name>/memory.md` at every node entry (inlined into the cached system
+prompt) and may append lessons via its `append_memory` tool — append-only. To prune, edit the
+file by hand (or ask Claude Code to); keep the `- [tag](file) — text` line format.
 
 ## Tests
 
 ```bash
-cd /work/markhsp/Embodied_Claw
-pipeline/.venv/bin/python -m pytest pipeline/tests/ -q
+.venv/bin/python -m pytest pipeline/tests/ -q
 ```
 
-All subprocess / HuggingFace calls are mocked; tests never touch GPUs, the network, or real
-dataset/checkpoint paths.
+Fully offline: FakeAnthropic scripts tool_use sequences, subprocess/HfApi/pyarrow are mocked,
+mailbox + runs live in tmp dirs. Covers the section-13 DoD: 7-node e2e from request.txt,
+kill-mid-train resume (real child process + os._exit), escalated-node resume via file drop,
+re-entry double-post guard, parallel fan-out/join, section-9 failure modes, mailbox format.
+
+## Design notes / deviations
+
+- `ask_user` pauses via langgraph `interrupt()` (resume value = parsed reply); the 30s poll
+  lives in the CLI driver, so a waiting pipeline can be killed for free and resumed later.
+  Stage status `escalated` is therefore recorded in `transitions.jsonl` + the question file,
+  NOT in the checkpointed StageStatus while the node waits: `interrupt()` raises before the
+  node returns, so `graph.get_state()` shows the stage as `pending` for the whole wait and the
+  `escalation` dict (with `user_reply`) lands on the StageStatus only at node completion. This
+  is the accepted reading of the sanctioned interrupt() deviation — the file mailbox is the
+  contract; inbox/bridge/CLI all consume the files, never the checkpoint.
+- Run-scoped agent context lives in `runs/<id>/agent_conv/<agent>.json` (saved every turn),
+  not inside LangGraph state as spec section 3 words it. Deliberate: token-heavy transcripts
+  replay from the exact pending tool call after a crash, which `state.sqlite` alone could not
+  reconstruct. Caveat: manual checkpoint surgery (rollback/fork) does not roll back the
+  conversation files — delete `agent_conv/` too if you ever rewind a checkpoint by hand.
+- Agents call one tool at a time (`disable_parallel_tool_use`) so a crash mid-tool replays
+  deterministically from the persisted conversation.
+- `slice_and_renumber` (spec signature, returns a pyarrow Table) stays internal to the
+  composite `build_curated_dataset`; the agent-facing `slice_and_renumber` tool is a thin
+  wrapper requiring `dst_path` and returning `{"rows", "dst_path"}` (a Table cannot round-trip
+  a JSON tool_result).
+- Node 0's spec SKILLS list names `confirm_with_user`; intake confirmation flows through the
+  generic `ask_user` builtin (functionally identical, also sanctioned by Node 0's TOOLS line).
+  The authoritative section-5 skill tables never list `confirm_with_user`.
+- Node 2's spec TOOLS line lists Write/Edit "for build scripts"; there is no separate
+  write_file/edit_file builtin — bash heredocs (`cat > script.py <<'EOF' ...`) are the
+  sanctioned write path for free-form build scripts.
+- LOC budget (spec section 13, <=~1800 for "skills + agents + graph + mailbox + CLI"): the
+  parenthetical sum (skills, agents/, graph.py, tools.py+inbox.py, cli.py) sits a few percent
+  over the tilde'd cap (~1860) and ~2200 counting the templated `nodes/*.py` wrappers and
+  `state.py`. The overage is review-mandated safety hardening (unconditional rebuild gates,
+  launch/monitor liveness handling, structured train_request pass-through); accepted rather
+  than shaved. If it must shrink, the 7 one-screen node files collapse into a single table.
