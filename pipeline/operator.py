@@ -215,12 +215,18 @@ def _mk_tools(thread_ts: str) -> list:
 
     @tool("launch_train_run", "Launch a training-pipeline run (FSM: ingest -> filter_build -> "
           "norm_stats||upload_dataset -> train -> upload_model). Pass the full RunConfig JSON "
-          "you confirmed with the user — it skips the FSM intake's own escalations. Schema: "
+          "you confirmed with the user — it skips the FSM intake's own escalations. The FSM "
+          "RECONCILES on-disk artifacts before running: stages whose outputs already exist "
+          "(sources downloaded / dataset built / norm stats / final checkpoint complete) are "
+          "skipped, so this same tool serves upload-only or norm-stats-only requests — for "
+          "those, add explicit top-level dataset_name and/or train_config_name keys so "
+          "reconcile finds the artifacts (else they are derived from outputs.hf_dataset_repo "
+          "basename). Schema: "
           '{description, data_request:{task_description, sources:[{description, hf_repo, '
           'repo_type, kind(snapshot|single_file_zip), allow_patterns, filename, local_dir}], '
           'filter_description(free-form)}, train_request:{base_model, num_train_steps, '
           'batch_size, peak_lr, fsdp_devices, save_interval, wandb_enabled}, '
-          'outputs:{hf_dataset_repo, hf_model_repo}}',
+          'outputs:{hf_dataset_repo, hf_model_repo}, dataset_name?, train_config_name?}',
           {"type": "object", "properties": {
               "run_id": {"type": "string", "description": "short slug, e.g. perturb_recovery4"},
               "request": {"type": "string", "description": "the user's request, verbatim"},
@@ -278,6 +284,10 @@ confirm the FULL config with the user in this thread, then launch_train_run — 
 confirmation replaces the FSM intake's own escalation round. Launched runs are autonomous; \
 don't babysit. If a run escalates a question, relay it conversationally and use \
 answer_escalation once the user decides.
+- Partial requests (upload an existing checkpoint, recompute norm stats, build-only): SAME \
+tool — the FSM reconciles on-disk artifacts and only runs what's missing. Set explicit \
+dataset_name / train_config_name in the config (check checkpoint_status / dataset_status \
+for the exact names) and confirm with the user which stages reconcile will skip.
 - TRAINING SAFETY (non-negotiable): never start, restart, or kill a training process via \
 Bash — training launches ONLY through launch_train_run (the FSM attach-guards against \
 double launches; train scripts use --overwrite, a manual duplicate launch destroys a live \

@@ -34,5 +34,21 @@ CONFIG:
 {cfg_excerpt(state, 'train_request')}"""
 
 
-node = agent_node("train", lambda s: make_agent(s, SKILLS, builtins=("bash", "read_file")),
-                  prompt, requires=("norm_stats",))
+_agent_node = agent_node("train", lambda s: make_agent(s, SKILLS, builtins=("bash", "read_file")),
+                         prompt, requires=("norm_stats",))
+
+
+def node(state: dict) -> dict:
+    """Artifact guard (defense in depth alongside cli-level reconcile): if the final
+    checkpoint is already complete on disk, this stage IS done — never reach the agent,
+    never risk a launch_detached_train --overwrite over finished work."""
+    if (state.get("train") or {}).get("status") != "succeeded":
+        from pipeline import reconcile, tools
+        done, why = reconcile.train_done(state.get("config") or {})
+        if done:
+            tools.log_transition(state["run_id"], "train", "succeeded",
+                                 f"reconciled: final checkpoint already complete at {why}")
+            return {"train": {"status": "succeeded", "started_at": tools.now(),
+                              "finished_at": tools.now(), "artifact_paths": [why],
+                              "agent_thread_id": None, "escalation": None, "error": None}}
+    return _agent_node(state)

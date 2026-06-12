@@ -1,0 +1,1 @@
+Evaluate pi05-robotwin2-clean-30k on all 35 DOMINO tasks, 25 episodes per task, all 8 GPUs, langgraph pipeline.

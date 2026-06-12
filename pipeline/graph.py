@@ -31,6 +31,21 @@ def build_graph(checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
+def build_single_node_graph(node_name: str, checkpointer=None):
+    """One-node graph for `cli node <name> <run_id>`: the same node function under the same
+    checkpointer mechanics, so ask_user interrupt/resume and transitions work identically.
+    Upstream gating (the node's `requires`) is satisfied by reconcile-seeded state."""
+    import importlib
+    if node_name not in STAGES:
+        raise ValueError(f"unknown node '{node_name}' (choose from {', '.join(STAGES)})")
+    mod = importlib.import_module(f"pipeline.nodes.{node_name}")
+    g = StateGraph(PipelineState)
+    g.add_node(node_name, mod.node)
+    g.add_edge(START, node_name)
+    g.add_edge(node_name, END)
+    return g.compile(checkpointer=checkpointer)
+
+
 def open_checkpointer(run_id: str) -> SqliteSaver:
     """runs/<run_id>/state.sqlite; check_same_thread=False is mandatory — langgraph executes
     parallel nodes in a thread pool (SqliteSaver serializes access internally)."""

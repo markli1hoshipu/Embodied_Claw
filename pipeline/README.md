@@ -123,3 +123,25 @@ re-entry double-post guard, parallel fan-out/join, section-9 failure modes, mail
   `state.py`. The overage is review-mandated safety hardening (unconditional rebuild gates,
   launch/monitor liveness handling, structured train_request pass-through); accepted rather
   than shaved. If it must shrink, the 7 one-screen node files collapse into a single table.
+
+## Entering the FSM at any point (reconcile)
+
+`run` grounds stage status in **on-disk evidence** before invoking the graph (default on):
+sources present → ingest seeded; `meta/info.json` with episodes → filter_build; `norm_stats.json`
+→ norm_stats; complete final checkpoint (`<steps-1>/params + _CHECKPOINT_METADATA`) → train.
+The graph then starts at the first stage the filesystem cannot vouch for — e.g. uploading an
+already-trained checkpoint runs only the upload nodes. Uploads are never auto-seeded (proving
+them needs the HF API; re-uploads dedup by SHA). The train node additionally carries its own
+artifact guard: a complete final checkpoint can never be re-launched (`--overwrite` safety).
+
+```bash
+python -m pipeline.cli run <id>                  # auto-reconcile (prints the evidence table)
+python -m pipeline.cli run <id> --no-reconcile   # v2 behavior: trust only graph state
+python -m pipeline.cli run <id> --from train     # explicit entry point; conflicts need --force
+python -m pipeline.cli node upload_model <id>    # ONE node in a one-node graph (own thread_id,
+                                                 # same escalation/resume mechanics); --force
+                                                 # bypasses unproven upstream requires-gates
+```
+
+Reconcile derives `dataset_name` from `outputs.hf_dataset_repo` and `train_config_name` via the
+`pi05_<b1k_...>` convention — set both explicitly in config.json when they differ.

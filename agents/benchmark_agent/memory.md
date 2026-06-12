@@ -38,3 +38,4 @@
   window. retry_shard also revives status=failed shards.
 - run_pending_shards/shard_log_tail numeric params (max_minutes/max_bytes) work as integers
   now (tool-schema typing fixed 2026-06-11); calling with run_id only also remains fine.
+- aggregate_results: overall.total_episodes is the MEAN episodes per task (e.g. 10.0), not the run total — sum per_task[].total_episodes for the real episode count when writing summaries (20 tasks x 10 eps = 200). Verified on eval_zeroshot_10eps_v2.
