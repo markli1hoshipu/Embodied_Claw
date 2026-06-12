@@ -67,6 +67,26 @@ def get_client():
     return anthropic.Anthropic(max_retries=5)
 
 
+def use_sdk_backend() -> bool:
+    """Pick the agent backend: claude-agent-sdk (Claude Code subscription auth, no API key —
+    same as eval_domino) vs the raw anthropic SDK (Messages API, needs ANTHROPIC_API_KEY).
+    EMBODIED_CLAW_BACKEND=sdk|api overrides; default is api when a key is set, else sdk."""
+    forced = os.environ.get("EMBODIED_CLAW_BACKEND")
+    if forced in ("sdk", "api"):
+        return forced == "sdk"
+    return not os.environ.get("ANTHROPIC_API_KEY")
+
+
+def make_backend(name: str, run_id: str, skills: dict, system_intro: str,
+                 builtins: tuple = ()):
+    """Shared factory for the three agent modules — one switch, two interchangeable backends
+    (both expose name / last_escalation / run_node for pipeline.nodes.agent_node)."""
+    if use_sdk_backend():
+        from pipeline.agents.sdk_base import SDKAgent  # lazy: claude_agent_sdk import
+        return SDKAgent(name, run_id, skills, system_intro, builtins=builtins)
+    return Agent(name, run_id, skills, system_intro, builtins=builtins)
+
+
 def _json_type(ann) -> str:
     if ann is inspect.Parameter.empty:
         return "string"

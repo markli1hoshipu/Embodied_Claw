@@ -142,11 +142,11 @@ def launch_train_run_impl(thread_ts: str, run_id: str, request: str,
     rd = tools.run_dir(run_id)
     if (rd / "request.txt").exists():
         return {"error": f"run '{run_id}' already exists — pick a new run_id or use run_status"}
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return {"error": "ANTHROPIC_API_KEY is not set in the bridge/operator environment — "
-                         "the FSM's agent nodes (ingest/filter_build/...) need it. Add it to "
-                         "the bridge service env (.env + systemd unit) before launching runs. "
-                         "Status/escalation tools keep working without it."}
+    from pipeline.agents.base import use_sdk_backend  # default: subscription auth, keyless
+    if not use_sdk_backend() and not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"error": "EMBODIED_CLAW_BACKEND=api is forced but ANTHROPIC_API_KEY is not set "
+                         "— either export the key or unset EMBODIED_CLAW_BACKEND to use the "
+                         "claude-agent-sdk subscription backend."}
     try:
         cfg = json.loads(config_json)
     except json.JSONDecodeError as e:

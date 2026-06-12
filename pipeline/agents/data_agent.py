@@ -24,6 +24,6 @@ SYSTEM = ("You own data: intake (natural language -> RunConfig), source ingest, 
           "(3=place-on is the dropped tail).")
 
 
-def make_agent(state: dict, skill_names: tuple, builtins: tuple = ()) -> base.Agent:
-    return base.Agent("data_agent", state["run_id"],
-                      {n: REGISTRY[n] for n in skill_names}, SYSTEM, builtins=builtins)
+def make_agent(state: dict, skill_names: tuple, builtins: tuple = ()):
+    return base.make_backend("data_agent", state["run_id"],
+                             {n: REGISTRY[n] for n in skill_names}, SYSTEM, builtins=builtins)

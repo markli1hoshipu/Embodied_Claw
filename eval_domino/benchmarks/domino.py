@@ -14,6 +14,15 @@ MIN_FREE_MB = 100_000  # a GPU already hosting a ~57GB model server must NEVER b
 SHARD_TIMEOUT_S = 3 * 3600
 _NOT_TASKS = {"robot", "camera", "curobo"}
 
+# FastWAM checkpoint registry: model_name → (ckpt_path, dataset_stats_path)
+_FASTWAM_CKPT_ROOT = Path("/work/markhsp/FastWAM/checkpoints/fastwam_release")
+FASTWAM_CHECKPOINTS: dict[str, tuple[str, str]] = {
+    "fastwam-robotwin-release": (
+        str(_FASTWAM_CKPT_ROOT / "robotwin_uncond_3cam_384.pt"),
+        str(_FASTWAM_CKPT_ROOT / "robotwin_uncond_3cam_384_dataset_stats.json"),
+    ),
+}
+
 # Program-error signatures (shard infra broke) vs eval-outcome failures (policy just did badly).
 ERROR_PATTERNS = ("Traceback", "CUDA error", "illegal instruction", "out of memory",
                   "ModuleNotFoundError", "ImportError", "cudaError", "Segmentation fault",
@@ -46,10 +55,24 @@ def shard_cmd(task: str, task_config: str, train_config_name: str, model_name: s
     never kill it), so 9100+gpu_id deterministically EADDRINUSEs every GPU-0 shard."""
     port = 9210 + int(gpu_id)
     server_py = DOMINO / "policy" / policy / ".venv" / "bin" / "python"
-    overrides = (f"--task_name {task} --task_config {task_config} "
-                 f"--train_config_name {train_config_name} --model_name {model_name} "
-                 f"--checkpoint_id {checkpoint_id} --ckpt_setting {model_name} "
-                 f"--seed {seed} --policy_name {policy} --test_num {int(episodes)}")
+
+    if policy == "fastwam":
+        if model_name not in FASTWAM_CHECKPOINTS:
+            raise ValueError(
+                f"Unknown fastwam model_name '{model_name}'. "
+                f"Known: {list(FASTWAM_CHECKPOINTS)}"
+            )
+        ckpt_path, stats_path = FASTWAM_CHECKPOINTS[model_name]
+        overrides = (f"--task_name {task} --task_config {task_config} "
+                     f"--train_config_name {train_config_name} --model_name {model_name} "
+                     f"--checkpoint_id {checkpoint_id} --ckpt_setting {ckpt_path} "
+                     f"--dataset_stats_path {stats_path} "
+                     f"--seed {seed} --policy_name {policy} --test_num {int(episodes)}")
+    else:
+        overrides = (f"--task_name {task} --task_config {task_config} "
+                     f"--train_config_name {train_config_name} --model_name {model_name} "
+                     f"--checkpoint_id {checkpoint_id} --ckpt_setting {model_name} "
+                     f"--seed {seed} --policy_name {policy} --test_num {int(episodes)}")
     return (
         # cd must NOT be chained into the backgrounded list with '&&': 'cd X && srv &'
         # backgrounds the whole list, so the main shell (which runs the client) never

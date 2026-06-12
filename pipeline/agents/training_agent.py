@@ -22,6 +22,6 @@ SYSTEM = ("You own openpi training: TrainConfig insertion, norm stats, NCCL pref
           "Prior healthy runs converged to loss ~0.0035-0.008.")
 
 
-def make_agent(state: dict, skill_names: tuple, builtins: tuple = ()) -> base.Agent:
-    return base.Agent("training_agent", state["run_id"],
-                      {n: REGISTRY[n] for n in skill_names}, SYSTEM, builtins=builtins)
+def make_agent(state: dict, skill_names: tuple, builtins: tuple = ()):
+    return base.make_backend("training_agent", state["run_id"],
+                             {n: REGISTRY[n] for n in skill_names}, SYSTEM, builtins=builtins)

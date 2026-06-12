@@ -19,6 +19,6 @@ SYSTEM = ("You own HuggingFace publishing. Conventions: datasets Hoshipu/b1k_<ta
           "creating anything.")
 
 
-def make_agent(state: dict, skill_names: tuple, builtins: tuple = ()) -> base.Agent:
-    return base.Agent("hf_agent", state["run_id"],
-                      {n: REGISTRY[n] for n in skill_names}, SYSTEM, builtins=builtins)
+def make_agent(state: dict, skill_names: tuple, builtins: tuple = ()):
+    return base.make_backend("hf_agent", state["run_id"],
+                             {n: REGISTRY[n] for n in skill_names}, SYSTEM, builtins=builtins)

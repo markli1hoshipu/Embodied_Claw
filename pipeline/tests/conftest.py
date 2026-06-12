@@ -10,9 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root
 @pytest.fixture(autouse=True)
 def notify_calls(monkeypatch):
     """No test may exec a real notify-send (tests mock every subprocess): tools.notify is
-    replaced everywhere with a recorder. Request this fixture to assert on notifications."""
+    replaced everywhere with a recorder. Request this fixture to assert on notifications.
+    Also pins the agent backend to the raw-anthropic path — the test harness (FakeAnthropic
+    via patch_client) scripts that backend; the sdk backend would shell out to claude-code."""
     calls: list[str] = []
     monkeypatch.setattr("pipeline.tools.notify", lambda summary: calls.append(str(summary)))
+    monkeypatch.setenv("EMBODIED_CLAW_BACKEND", "api")
     return calls
 
 

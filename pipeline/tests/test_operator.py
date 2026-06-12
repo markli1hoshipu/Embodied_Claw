@@ -84,12 +84,19 @@ def test_run_status_and_list_runs(env):
 
 
 # ------------------------------------------------------------------ launch gating
-def test_launch_requires_api_key(env, monkeypatch):
+def test_launch_backend_gating(env, monkeypatch):
+    # forced api backend without a key -> refuse (conftest pins EMBODIED_CLAW_BACKEND=api)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     res = op.launch_train_run_impl("111.222", "tr_new", "req", json.dumps(MINIMAL_CONFIG),
                                    spawn=lambda rid: (_ for _ in ()).throw(AssertionError))
     assert "ANTHROPIC_API_KEY" in res["error"]
     assert not (tools.run_dir("tr_new") / "request.txt").exists()
+    # default/sdk backend (claude-agent-sdk subscription auth) launches keyless
+    monkeypatch.setenv("EMBODIED_CLAW_BACKEND", "sdk")
+    spawned = []
+    res = op.launch_train_run_impl("111.222", "tr_new", "req", json.dumps(MINIMAL_CONFIG),
+                                   spawn=spawned.append)
+    assert res["ok"] and spawned == ["tr_new"]
 
 
 def test_launch_writes_confirmed_config_and_spawns(env, monkeypatch):

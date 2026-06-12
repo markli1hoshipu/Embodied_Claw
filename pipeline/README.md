@@ -19,7 +19,12 @@ to the `xvla-stable` conda env (downloads, PCA, norm stats, training all do).
 
 ## Configure
 
-- `export ANTHROPIC_API_KEY=...` — required to run agents (clear error if missing).
+- Agent auth — two interchangeable backends, picked by `pipeline.agents.base.make_backend`:
+  - **claude-agent-sdk** (default when no key is set): subscription auth from the logged-in
+    Claude Code CLI, same as eval_domino and the Slack operators. No API key needed.
+    Escalations block in-tool on the mailbox (crash-safe: re-attach on node re-run).
+  - **raw anthropic SDK**: used when `ANTHROPIC_API_KEY` is exported. Escalations use
+    LangGraph interrupt/resume. Force either with `EMBODIED_CLAW_BACKEND=sdk|api`.
 - `export HF_TOKEN=...` — required by ingest/upload skills. Never hardcoded.
 - Model: defaults to `claude-sonnet-4-6`. Override globally `EMBODIED_CLAW_MODEL=...` or
   per-agent `EMBODIED_CLAW_MODEL_DATA_AGENT=claude-opus-4-8` etc. Adaptive thinking is on;
